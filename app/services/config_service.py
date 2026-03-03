@@ -422,7 +422,7 @@ class ConfigService:
                 LLMConfig(
                     provider=ModelProvider.QWEN,
                     model_name="qwen-turbo",
-                    api_key="your-qwen-api-key",
+                    api_key="sk-a3b642bbd8004355b4c9bae9f0155f72",
                     api_base="https://dashscope.aliyuncs.com/compatible-mode/v1",
                     max_tokens=4000,
                     temperature=0.7,

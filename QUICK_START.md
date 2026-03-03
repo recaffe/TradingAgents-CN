@@ -24,8 +24,9 @@ docker-compose up -d
 # 浏览器打开: http://localhost:8501
 
 
+
 debug启动
-DEBUGPY=1 DEBUGPY_WAIT_FOR_CLIENT=0 TRADINGAGENTS_LOG_LEVEL=DEBUG docker compose up -d --build --force-recreate backend
+DEBUGPY=1 DEBUGPY_WAIT_FOR_CLIENT=0 TRADINGAGENTS_LOG_LEVEL=DEBUG docker compose up -d --build --force-recreate  backend
 
 ```
 
