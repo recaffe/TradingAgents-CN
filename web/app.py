@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-TradingAgents-CN Streamlit Web界面
+TradingAgents-CN Streamlit Web界面22222222
 基于Streamlit的股票分析Web应用程序
 """
 

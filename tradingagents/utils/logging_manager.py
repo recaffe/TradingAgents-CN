@@ -86,7 +86,16 @@ class TradingAgentsLogger:
 
         # 从环境变量获取配置
         log_level = os.getenv('TRADINGAGENTS_LOG_LEVEL', 'INFO').upper()
-        log_dir = os.getenv('TRADINGAGENTS_LOG_DIR', './logs')
+        
+        # 检查是否应绕过 Docker 路径变量
+        bypass_docker_paths = os.getenv('TRADINGAGENTS_DO_NOT_USE_DOCKER_PATHS', '').lower() == 'true'
+        
+        if bypass_docker_paths:
+            # 不使用 Docker 路径，使用相对路径
+            log_dir = './logs'
+        else:
+            # 使用环境变量中的 Docker 路径或默认 ./logs
+            log_dir = os.getenv('TRADINGAGENTS_LOG_DIR', './logs')
 
         return {
             'level': log_level,
