@@ -8,6 +8,7 @@ import json
 import logging
 from pathlib import Path
 from typing import Optional
+from app.utils.api_key_utils import is_valid_api_key
 
 logger = logging.getLogger("app.config_bridge")
 
@@ -82,10 +83,10 @@ def bridge_config_to_env():
                 existing_env_value = os.getenv(env_key)
 
                 # 检查环境变量是否已存在且有效（不是占位符）
-                if existing_env_value and not existing_env_value.startswith("your_"):
+                if is_valid_api_key(existing_env_value):
                     logger.info(f"  ✓ 使用 .env 文件中的 {env_key} (长度: {len(existing_env_value)})")
                     bridged_count += 1
-                elif provider.api_key and not provider.api_key.startswith("your_"):
+                elif is_valid_api_key(provider.api_key):
                     # 只有当环境变量不存在或为占位符时，才使用数据库配置
                     os.environ[env_key] = provider.api_key
                     logger.info(f"  ✓ 使用数据库厂家配置的 {env_key} (长度: {len(provider.api_key)})")
@@ -108,12 +109,12 @@ def bridge_config_to_env():
                 existing_env_value = os.getenv(env_key)
 
                 # 检查环境变量是否已存在且有效（不是占位符）
-                if existing_env_value and not existing_env_value.startswith("your_"):
+                if is_valid_api_key(existing_env_value):
                     logger.info(f"  ✓ 使用 .env 文件中的 {env_key} (长度: {len(existing_env_value)})")
                     bridged_count += 1
                 elif llm_config.enabled and llm_config.api_key:
                     # 只有当环境变量不存在或为占位符时，才使用数据库配置
-                    if not llm_config.api_key.startswith("your_"):
+                    if is_valid_api_key(llm_config.api_key):
                         os.environ[env_key] = llm_config.api_key
                         logger.info(f"  ✓ 使用 JSON 文件中的 {env_key} (长度: {len(llm_config.api_key)})")
                         bridged_count += 1
@@ -734,4 +735,3 @@ __all__ = [
     'reload_bridged_config',
     'sync_pricing_config_now',
 ]
-

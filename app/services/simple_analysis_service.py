@@ -32,6 +32,7 @@ from app.services.config_service import ConfigService
 from app.services.memory_state_manager import get_memory_state_manager, TaskStatus
 from app.services.redis_progress_tracker import RedisProgressTracker, get_progress_by_id
 from app.services.progress_log_handler import register_analysis_tracker, unregister_analysis_tracker
+from app.utils.api_key_utils import is_valid_api_key
 
 # 股票基础信息获取（用于补充显示名称）
 try:
@@ -135,12 +136,12 @@ def get_provider_and_url_by_model_sync(model_name: str) -> dict:
 
                     # 🔥 确定 API Key（优先级：模型配置 > 厂家配置 > 环境变量）
                     api_key = None
-                    if model_api_key and model_api_key.strip() and model_api_key != "your-api-key":
+                    if is_valid_api_key(model_api_key):
                         api_key = model_api_key
                         logger.info(f"✅ [同步查询] 使用模型配置的 API Key")
                     elif provider_doc and provider_doc.get("api_key"):
                         provider_api_key = provider_doc["api_key"]
-                        if provider_api_key and provider_api_key.strip() and provider_api_key != "your-api-key":
+                        if is_valid_api_key(provider_api_key):
                             api_key = provider_api_key
                             logger.info(f"✅ [同步查询] 使用厂家配置的 API Key")
 
@@ -194,7 +195,7 @@ def get_provider_and_url_by_model_sync(model_name: str) -> dict:
 
                 if provider_doc.get("api_key"):
                     provider_api_key = provider_doc["api_key"]
-                    if provider_api_key and provider_api_key.strip() and provider_api_key != "your-api-key":
+                    if is_valid_api_key(provider_api_key):
                         api_key = provider_api_key
                         logger.info(f"✅ [同步查询] 使用厂家 {provider} 的 API Key")
 
@@ -244,7 +245,7 @@ def get_provider_and_url_by_model_sync(model_name: str) -> dict:
 
                 if provider_doc.get("api_key"):
                     provider_api_key = provider_doc["api_key"]
-                    if provider_api_key and provider_api_key.strip() and provider_api_key != "your-api-key":
+                    if is_valid_api_key(provider_api_key):
                         api_key = provider_api_key
                         logger.info(f"✅ [同步查询] 使用厂家 {provider} 的 API Key")
 
@@ -269,7 +270,7 @@ def get_provider_and_url_by_model_sync(model_name: str) -> dict:
         }
 
 
-def _get_env_api_key_for_provider(provider: str) -> str:
+def _get_env_api_key_for_provider(provider: str) -> Optional[str]:
     """
     从环境变量获取指定供应商的 API Key
 
@@ -284,6 +285,8 @@ def _get_env_api_key_for_provider(provider: str) -> str:
     env_key_map = {
         "google": "GOOGLE_API_KEY",
         "dashscope": "DASHSCOPE_API_KEY",
+        "alibaba": "DASHSCOPE_API_KEY",
+        "qwen": "DASHSCOPE_API_KEY",
         "openai": "OPENAI_API_KEY",
         "deepseek": "DEEPSEEK_API_KEY",
         "anthropic": "ANTHROPIC_API_KEY",
@@ -296,7 +299,7 @@ def _get_env_api_key_for_provider(provider: str) -> str:
     env_key_name = env_key_map.get(provider.lower())
     if env_key_name:
         api_key = os.getenv(env_key_name)
-        if api_key and api_key.strip() and api_key != "your-api-key":
+        if is_valid_api_key(api_key):
             return api_key
 
     return None
