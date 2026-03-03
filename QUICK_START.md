@@ -22,7 +22,13 @@ docker-compose up -d
 
 # 4. 访问应用
 # 浏览器打开: http://localhost:8501
+
+
+debug启动
+DEBUGPY=1 DEBUGPY_WAIT_FOR_CLIENT=0 TRADINGAGENTS_LOG_LEVEL=DEBUG docker compose up -d --build --force-recreate backend
+
 ```
+
 
 ### 💻 方式二：本地安装
 **适合**: 开发者和高级用户
