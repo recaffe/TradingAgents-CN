@@ -340,10 +340,12 @@ class ModelCapabilityService:
         # 筛选适合快速分析的模型
         quick_candidates = []
         for m in enabled_models:
-            roles = getattr(m, 'suitable_roles', [ModelRole.BOTH])
-            level = getattr(m, 'capability_level', 2)
-            features = getattr(m, 'features', [])
-            
+            # 统一走 get_model_config，避免 Pydantic/DB 类型不一致导致特性判断失真
+            cfg = self.get_model_config(m.model_name)
+            roles = cfg.get("suitable_roles", [ModelRole.BOTH])
+            level = cfg.get("capability_level", 2)
+            features = cfg.get("features", [])
+
             if (ModelRole.QUICK_ANALYSIS in roles or ModelRole.BOTH in roles) and \
                level >= requirements["quick_model_min"] and \
                ModelFeature.TOOL_CALLING in features:
@@ -352,9 +354,10 @@ class ModelCapabilityService:
         # 筛选适合深度分析的模型
         deep_candidates = []
         for m in enabled_models:
-            roles = getattr(m, 'suitable_roles', [ModelRole.BOTH])
-            level = getattr(m, 'capability_level', 2)
-            
+            cfg = self.get_model_config(m.model_name)
+            roles = cfg.get("suitable_roles", [ModelRole.BOTH])
+            level = cfg.get("capability_level", 2)
+
             if (ModelRole.DEEP_ANALYSIS in roles or ModelRole.BOTH in roles) and \
                level >= requirements["deep_model_min"]:
                 deep_candidates.append(m)
@@ -380,9 +383,36 @@ class ModelCapabilityService:
         quick_model = quick_candidates[0].model_name if quick_candidates else None
         deep_model = deep_candidates[0].model_name if deep_candidates else None
         
-        # 如果没找到合适的，使用系统默认
+        # 如果没找到合适的，使用系统默认（但默认也需要通过最小约束）
         if not quick_model or not deep_model:
-            return self._get_default_models()
+            default_quick, default_deep = self._get_default_models()
+            default_validation = self.validate_model_pair(default_quick, default_deep, research_depth)
+            if default_validation.get("valid"):
+                return default_quick, default_deep
+
+            # 默认也不合法时，做一次保底挑选：优先任意支持 TOOL_CALLING 的模型作为 quick
+            fallback_quick = None
+            fallback_deep = None
+
+            for m in enabled_models:
+                cfg = self.get_model_config(m.model_name)
+                if ModelFeature.TOOL_CALLING in cfg.get("features", []) and cfg.get("capability_level", 0) >= requirements["quick_model_min"]:
+                    fallback_quick = m.model_name
+                    break
+
+            for m in enabled_models:
+                cfg = self.get_model_config(m.model_name)
+                if cfg.get("capability_level", 0) >= requirements["deep_model_min"]:
+                    fallback_deep = m.model_name
+                    break
+
+            if fallback_quick and fallback_deep:
+                logger.warning(
+                    f"⚠️ 默认模型不满足约束，使用保底模型: quick={fallback_quick}, deep={fallback_deep}"
+                )
+                return fallback_quick, fallback_deep
+
+            return default_quick, default_deep
         
         logger.info(
             f"🤖 为 {research_depth} 分析推荐模型: "
@@ -427,4 +457,3 @@ def get_model_capability_service() -> ModelCapabilityService:
     if _model_capability_service is None:
         _model_capability_service = ModelCapabilityService()
     return _model_capability_service
-

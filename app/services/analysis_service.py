@@ -5,7 +5,6 @@
 
 import asyncio
 import uuid
-import json
 import logging
 from datetime import datetime
 from typing import Dict, Any, List, Optional, Callable
@@ -52,7 +51,6 @@ class AnalysisService:
         self.queue_service = QueueService(redis_client)
         # 初始化使用统计服务
         self.usage_service = UsageStatisticsService()
-        self._trading_graph_cache = {}
         # 进度跟踪器缓存
         self._progress_trackers: Dict[str, RedisProgressTracker] = {}
 
@@ -80,21 +78,15 @@ class AnalysisService:
             return PyObjectId(new_object_id)
     
     def _get_trading_graph(self, config: Dict[str, Any]) -> TradingAgentsGraph:
-        """获取或创建TradingAgents图实例（带缓存）- 与单股分析保持一致"""
-        config_key = json.dumps(config, sort_keys=True)
-
-        if config_key not in self._trading_graph_cache:
-            # 直接使用完整配置，不再合并DEFAULT_CONFIG（因为create_analysis_config已经处理了）
-            # 这与单股分析服务和web目录的方式一致
-            self._trading_graph_cache[config_key] = TradingAgentsGraph(
-                selected_analysts=config.get("selected_analysts", ["market", "fundamentals"]),
-                debug=config.get("debug", False),
-                config=config
-            )
-
-            logger.info(f"创建新的TradingAgents实例: {config.get('llm_provider', 'default')}")
-
-        return self._trading_graph_cache[config_key]
+        """获取TradingAgents图实例（并发安全：每次创建新实例）"""
+        # TradingAgentsGraph 存在可变状态，跨任务复用会导致并发污染。
+        graph = TradingAgentsGraph(
+            selected_analysts=config.get("selected_analysts", ["market", "fundamentals"]),
+            debug=config.get("debug", False),
+            config=config
+        )
+        logger.info(f"创建新的TradingAgents实例: {config.get('llm_provider', 'default')}")
+        return graph
 
     def _execute_analysis_sync_with_progress(self, task: AnalysisTask, progress_tracker: RedisProgressTracker) -> AnalysisResult:
         """同步执行分析任务（在线程池中运行，带进度跟踪）"""

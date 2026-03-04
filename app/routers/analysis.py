@@ -275,7 +275,7 @@ async def get_task_result(
                 result_data = {
                     "analysis_id": mongo_result.get("analysis_id"),
                     "stock_symbol": mongo_result.get("stock_symbol"),
-                    "stock_code": mongo_result.get("stock_symbol"),  # 兼容性
+                    "stock_code": mongo_result.get("stock_code") or mongo_result.get("stock_symbol"),  # 兼容性
                     "analysis_date": mongo_result.get("analysis_date"),
                     "summary": mongo_result.get("summary", ""),
                     "recommendation": mongo_result.get("recommendation", ""),
@@ -340,9 +340,6 @@ async def get_task_result(
 
         if not result_data:
             logger.warning(f"❌ [RESULT] 所有数据源都未找到结果: {task_id}")
-            raise HTTPException(status_code=404, detail="分析结果不存在")
-
-        if not result_data:
             raise HTTPException(status_code=404, detail="分析结果不存在")
 
         # 处理reports字段 - 如果没有reports字段，优先尝试从文件系统加载，其次从state中提取
@@ -646,7 +643,7 @@ async def get_task_result(
             "analysis_id": safe_string(result_data.get("analysis_id"), "unknown"),
             "stock_symbol": safe_string(result_data.get("stock_symbol"), "UNKNOWN"),
             "stock_code": safe_string(result_data.get("stock_code"), "UNKNOWN"),
-            "analysis_date": safe_string(result_data.get("analysis_date"), "2025-08-20"),
+            "analysis_date": safe_string(result_data.get("analysis_date"), ""),
             "summary": safe_string(result_data.get("summary"), "分析摘要暂无"),
             "recommendation": safe_string(result_data.get("recommendation"), "投资建议暂无"),
             "confidence_score": safe_number(result_data.get("confidence_score"), 0.0),

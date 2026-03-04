@@ -782,6 +782,8 @@ class SimpleAnalysisService:
                         "stock_name": name,
                         "status": "pending",
                         "progress": 0,
+                        "parameters": request.parameters.model_dump() if request.parameters else {},
+                        "request_payload": request.model_dump(),
                         "created_at": datetime.utcnow(),
                     }},
                     upsert=True
@@ -1163,53 +1165,75 @@ class SimpleAnalysisService:
             # 配置阶段 - 对应步骤3 "⚙️ 参数设置" (6-8%)
             update_progress_sync(7, "⚙️ 配置分析参数", "configuration")
 
-            # 🆕 智能模型选择逻辑
+            # 🆕 智能模型选择逻辑（收敛式）
             from app.services.model_capability_service import get_model_capability_service
             capability_service = get_model_capability_service()
 
             research_depth = request.parameters.research_depth if request.parameters else "标准"
-
-            # 1. 检查前端是否指定了模型
-            if (request.parameters and
+            user_specified_models = (
+                request.parameters and
                 hasattr(request.parameters, 'quick_analysis_model') and
                 hasattr(request.parameters, 'deep_analysis_model') and
                 request.parameters.quick_analysis_model and
-                request.parameters.deep_analysis_model):
+                request.parameters.deep_analysis_model
+            )
 
-                # 使用前端指定的模型
+            if user_specified_models:
                 quick_model = request.parameters.quick_analysis_model
                 deep_model = request.parameters.deep_analysis_model
-
                 logger.info(f"📝 [分析服务] 用户指定模型: quick={quick_model}, deep={deep_model}")
-
-                # 验证模型是否合适
-                validation = capability_service.validate_model_pair(
-                    quick_model, deep_model, research_depth
-                )
-
-                if not validation["valid"]:
-                    # 记录警告
-                    for warning in validation["warnings"]:
-                        logger.warning(warning)
-
-                    # 如果模型不合适，自动切换到推荐模型
-                    logger.info(f"🔄 自动切换到推荐模型...")
-                    quick_model, deep_model = capability_service.recommend_models_for_depth(
-                        research_depth
-                    )
-                    logger.info(f"✅ 已切换: quick={quick_model}, deep={deep_model}")
-                else:
-                    # 即使验证通过，也记录警告信息
-                    for warning in validation["warnings"]:
-                        logger.info(warning)
-                    logger.info(f"✅ 用户选择的模型验证通过: quick={quick_model}, deep={deep_model}")
-
             else:
-                # 2. 自动推荐模型
-                quick_model, deep_model = capability_service.recommend_models_for_depth(
-                    research_depth
-                )
+                quick_model, deep_model = capability_service.recommend_models_for_depth(research_depth)
                 logger.info(f"🤖 自动推荐模型: quick={quick_model}, deep={deep_model}")
+
+            max_rounds = 3
+            model_convergence = {
+                "max_rounds": max_rounds,
+                "source": "user" if user_specified_models else "auto",
+                "requested_quick_model": request.parameters.quick_analysis_model if user_specified_models else None,
+                "requested_deep_model": request.parameters.deep_analysis_model if user_specified_models else None,
+                "attempts": [],
+                "converged": False
+            }
+
+            for round_idx in range(1, max_rounds + 1):
+                validation = capability_service.validate_model_pair(quick_model, deep_model, research_depth)
+                warnings = validation.get("warnings", [])
+                model_convergence["attempts"].append({
+                    "round": round_idx,
+                    "quick_model": quick_model,
+                    "deep_model": deep_model,
+                    "valid": bool(validation.get("valid")),
+                    "warnings": warnings
+                })
+
+                if validation.get("valid"):
+                    model_convergence["converged"] = True
+                    logger.info(f"✅ 模型组合收敛: round={round_idx}, quick={quick_model}, deep={deep_model}")
+                    for warning in warnings:
+                        logger.info(warning)
+                    break
+
+                for warning in warnings:
+                    logger.warning(warning)
+
+                if round_idx == max_rounds:
+                    break
+
+                next_quick, next_deep = capability_service.recommend_models_for_depth(research_depth)
+                logger.warning(
+                    f"⚠️ 模型组合无效，执行第{round_idx}次重选: "
+                    f"({quick_model}, {deep_model}) -> ({next_quick}, {next_deep})"
+                )
+                quick_model, deep_model = next_quick, next_deep
+
+            if not model_convergence["converged"]:
+                error_msg = (
+                    f"模型组合在 {max_rounds} 轮后仍未收敛: "
+                    f"quick={quick_model}, deep={deep_model}, depth={research_depth}"
+                )
+                logger.error(f"❌ {error_msg}")
+                raise ValueError(error_msg)
 
             # 🔧 根据快速模型和深度模型分别查找对应的供应商和 API URL
             quick_provider_info = get_provider_and_url_by_model_sync(quick_model)
@@ -1230,6 +1254,37 @@ class SimpleAnalysisService:
                 logger.info(f"✅ [供应商验证] 两个模型来自同一厂家: {quick_provider}")
             else:
                 logger.info(f"✅ [混合模式] 快速模型({quick_provider}) 和 深度模型({deep_provider}) 来自不同厂家")
+
+            resolved_model_info = {
+                "quick_model": quick_model,
+                "deep_model": deep_model,
+                "quick_provider": quick_provider,
+                "deep_provider": deep_provider,
+                "quick_backend_url": quick_backend_url,
+                "deep_backend_url": deep_backend_url,
+                "model_convergence": model_convergence,
+            }
+
+            # 持久化模型追踪信息，便于任务追溯与问题定位
+            try:
+                from pymongo import MongoClient
+                from app.core.config import settings
+                sync_client = MongoClient(settings.MONGO_URI)
+                sync_db = sync_client[settings.MONGO_DB]
+                sync_db.analysis_tasks.update_one(
+                    {"task_id": task_id},
+                    {"$set": {
+                        "resolved_model_info": resolved_model_info,
+                        "parameters.quick_analysis_model": quick_model,
+                        "parameters.deep_analysis_model": deep_model,
+                        "parameters.research_depth": research_depth,
+                        "parameters.market_type": request.parameters.market_type if request.parameters else "A股",
+                        "updated_at": datetime.utcnow()
+                    }}
+                )
+                sync_client.close()
+            except Exception as model_trace_error:
+                logger.warning(f"⚠️ 持久化模型追踪信息失败: {model_trace_error}")
 
             # 获取市场类型
             market_type = request.parameters.market_type if request.parameters else "A股"
@@ -1807,6 +1862,8 @@ class SimpleAnalysisService:
                 "decision": formatted_decision,
                 # 🔥 添加模型信息字段
                 "model_info": model_info,
+                "resolved_model_info": resolved_model_info,
+                "model_convergence": model_convergence,
                 # 🆕 性能指标数据
                 "performance_metrics": state.get("performance_metrics", {}) if isinstance(state, dict) else {}
             }
@@ -2591,6 +2648,8 @@ class SimpleAnalysisService:
                 "stock_name": stock_name,  # 🔥 添加股票名称字段
                 "market_type": market_type,  # 🔥 添加市场类型字段
                 "model_info": result.get("model_info", "Unknown"),  # 🔥 添加模型信息字段
+                "resolved_model_info": result.get("resolved_model_info", {}),
+                "model_convergence": result.get("model_convergence", {}),
                 "analysis_date": timestamp.strftime('%Y-%m-%d'),
                 "timestamp": timestamp,
                 "status": "completed",
@@ -2648,7 +2707,9 @@ class SimpleAnalysisService:
                         "tokens_used": result.get("tokens_used", 0),
                         "reports": reports,  # 包含提取的报告内容
                         # 🔥 关键修复：添加格式化后的decision字段！
-                        "decision": result.get("decision", {})
+                        "decision": result.get("decision", {}),
+                        "resolved_model_info": result.get("resolved_model_info", {}),
+                        "model_convergence": result.get("model_convergence", {})
                     }}}
                 )
                 logger.info(f"💾 分析结果已保存 (web风格): {task_id}")
